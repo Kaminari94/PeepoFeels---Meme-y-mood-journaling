@@ -359,7 +359,11 @@ app.controller('MainCtrl', function($scope, $rootScope, $timeout){
 		}).then(function(){
 			console.log('Saved', entry);
 		}).then(function() {
-			$timeout(function(){ $rootScope.$broadcast('emotion-wheel:updated');});
+			$timeout(function(){
+				const el = document.getElementById('savedToast');
+				if (el) new bootstrap.Toast(el, {delay: 2000}).show();
+				$rootScope.$broadcast('emotion-wheel:updated');
+			});
 		});
 	};
 });
@@ -457,7 +461,7 @@ app.controller('Statistics', ['$scope', '$timeout', function ($scope, $timeout) 
 	};
 }]);
 
-app.controller('EntriesTable', function($scope, $timeout, DTOptionsBuilder, DTColumnDefBuilder){
+app.controller('EntriesTable', function($scope, $timeout, $rootScope, DTOptionsBuilder, DTColumnDefBuilder){
 
   $scope.rows = [];
 
@@ -489,7 +493,19 @@ app.controller('EntriesTable', function($scope, $timeout, DTOptionsBuilder, DTCo
     });
   };
   
-
+  $scope.deleteRow = function(at){
+    if (!confirm('Delete this entry?')) return;
+    localforage.getItem('emotion-wheel')
+      .then(list => (list || []).filter(it => it.at !== at))
+      .then(next => localforage.setItem('emotion-wheel', next))
+      .then(function(){
+        // Optimistically update table + notify others
+        $scope.$applyAsync(function(){
+          $scope.rows = $scope.rows.filter(r => r.at !== at);
+        });
+        $timeout(function(){ $rootScope.$broadcast('emotion-wheel:updated'); });
+      });
+  };
   
   $scope.refreshTable();
   
@@ -500,7 +516,7 @@ app.controller('EntriesTable', function($scope, $timeout, DTOptionsBuilder, DTCo
   
 });
 
-app.controller('DataConfig', function($scope, $timeout) {
+app.controller('DataConfig', function($scope, $timeout, $rootScope) {
 
   // Export to JSON file
   $scope.exportData = function() {
@@ -533,7 +549,7 @@ app.controller('DataConfig', function($scope, $timeout) {
         localforage.setItem('emotion-wheel', imported).then(function(){
           $timeout(function(){
 			$rootScope.$broadcast('emotion-wheel:updated');
-            alert("Data imported successfully (" + imported.length + " entries)");
+            alert("Data imported successfully! Imported (" + imported.length + " entries)");
           });
         });
       } catch(err) {
@@ -544,14 +560,12 @@ app.controller('DataConfig', function($scope, $timeout) {
   };
 
   // Delete all data
-  $scope.clearData = function() {
-    if (confirm("Are you sure you want to delete all emotion-wheel data?")) {
-      localforage.removeItem('emotion-wheel').then(function(){
-        $timeout(function(){
-          alert("All emotion-wheel data deleted");
-        });
-      });
-    }
+  $scope.clearData = function(){
+    if (!confirm('Delete all entries?')) return;
+    localforage.removeItem('emotion-wheel').then(function(){
+      $timeout(function(){ $rootScope.$broadcast('emotion-wheel:updated'); });
+      alert('All data deleted');
+    });
   };
 
 });
