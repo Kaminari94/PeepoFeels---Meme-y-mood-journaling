@@ -346,20 +346,21 @@ app.controller('ThemeToggle', function($scope, $rootScope, $document, $timeout) 
 
 app.controller('MainCtrl', function($scope, $rootScope, $timeout){
 	$scope.primary = emotionData;
+	$scope.entry = {comment: ''};
 	//(subsubemo.name, subemo.name, emo.name, comment)
 	$scope.pick = function(subsubemo, subemo, emo, comment){
-		if (!comment) {
-			comment = "No Comment";
-		}
-		var entry = { emotion:subsubemo, parent:subemo, grandparent:emo, comment:comment, at:new Date().toISOString() };
+
+		var entry = { emotion:subsubemo, parent:subemo, grandparent:emo, comment:$scope.entry.comment || 'No Comment', at:new Date().toISOString() };
 		localforage.getItem('emotion-wheel').then(function(list){
 			list = list || [];
 			list.push(entry);
 			return localforage.setItem('emotion-wheel', list);
 		}).then(function(){
-			console.log('Saved', entry);
+			//console.log('Saved', entry);
+			comment = "";
 		}).then(function() {
 			$timeout(function(){
+				$scope.entry.comment = '';
 				const el = document.getElementById('savedToast');
 				if (el) new bootstrap.Toast(el, {delay: 2000}).show();
 				$rootScope.$broadcast('emotion-wheel:updated');
@@ -369,102 +370,130 @@ app.controller('MainCtrl', function($scope, $rootScope, $timeout){
 });
 
 app.controller('Statistics', ['$scope', '$timeout', function ($scope, $timeout) {
-	$scope.primary = emotionData;
-	$scope.selected_grandparent = "";
-	// Get data from localforage
-	$scope.refreshStats = function() {
-		localforage.getItem('emotion-wheel').then(function(list) {
-			$scope.data = list || [];
-			
-			// Extract labels (timestamps)
-			//$scope.chartLabels = $scope.data.map(function(item) {
-			//    return new Date(item.at).toLocaleDateString();
-			//});
-			$scope.chartLabels = [];
-			
-			var counts = [0,0,0,0,0,0,0]; // Sun..Sat
-			$scope.data.forEach(function (item) {
-			  var d = new Date(item.at);
-			  counts[d.getDay()] += 1; //Use getUTCDay() if prefer UTC.
-			});
-			$scope.weekdayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-			$scope.weekdaySeries = ['Entries'];
-			$scope.weekdayData = [counts];
-			
-			// Group data by emotion type for chart series
-			var emotions = {};
-			$scope.data.forEach(function(item) {
-				if (!emotions[item.emotion]) {
-					$scope.chartLabels.push(item.emotion);
-					emotions[item.emotion] = 0;
-				}
-				emotions[item.emotion] += 1;
-			});
-			
-			line = {};
-			$scope.data.forEach(function(item) {
-			//	if (item.emotion === selected_emotion) {
-					
-			//7	}
-			})
-			
-			// Set up chart data
-			$scope.chartSeries = Object.keys(emotions);
-			$scope.chartData = $scope.chartSeries.map(function(emotion) {
-				return emotions[emotion];
-			});
-			
-			// Set up pie chart data
-			//$scope.pieLabels = $scope.chartSeries;
-			//$scope.pieData = $scope.chartSeries.map(function(emotion) {
-			//	return emotions[emotion];
-			//});
-			
-			$scope.$apply();
-		});
-	};
-	$scope.refreshStats();
-	
-	var off = $scope.$on('emotion-wheel:updated', function(){
-		$scope.refreshStats();
-	});
-	$scope.$on('$destroy', off);
-	
-	$scope.onClick = function (points, evt) {
-		console.log(points, evt);
-	};
-	$scope.pick_line = function (emo) {
-	  // Use already-loaded data; avoid re-reading localforage here
-	  const rows = ($scope.data || []).filter(it => it && it.emotion === emo);
+  $scope.primary = emotionData;
+  $scope.selected_grandparent = "";
 
-	  // Group by local calendar day
-	  const byDay = {}; // { 'YYYY-MM-DD': count }
-	  rows.forEach(it => {
-		const d = new Date(it.at);
-		const y = d.getFullYear();
-		const m = String(d.getMonth() + 1).padStart(2, '0'); // 01..12
-		const day = String(d.getDate()).padStart(2, '0');    // 01..31
-		const key = `${y}-${m}-${day}`;
-		byDay[key] = (byDay[key] || 0) + 1;
-	  });
+  // ----- Range: last 24h (Date objects) -----
+  $scope.range = { from: null, to: null };
+  (function initRange(){
+    const now = new Date();
+    $scope.range.to = now;
+    $scope.range.from = new Date(now.getTime() - 24*3600*1000);
+  })();
+  $scope.resetLast24h = function(){
+    const now = new Date();
+    $scope.range.to = now;
+    $scope.range.from = new Date(now.getTime() - 24*3600*1000);
+  };
 
-	  // Build labels (sorted) and data
-	  const labels = Object.keys(byDay).sort();        // ['2025-09-10','2025-09-11',...]
-	  const data = labels.map(k => byDay[k]);          // [3, 5, 2, ...]
+  // ----- Build hourly line for selected emotion within range -----
+  $scope.pick_line = function(emo){
+    $scope.currentEmotion = emo;
 
-	  // Update chart bindings (angular-chart.js wants array-of-arrays for data)
-	  $scope.$applyAsync(function () {
-		$scope.emotionSeries = ['Entries'];
-		$scope.emotionLabels = labels;
-		$scope.emotionLine = [data];  // NOTE: wrapped in an array
-	  });
-	};
+    const from = ($scope.range.from instanceof Date) ? $scope.range.from : null;
+    const to   = ($scope.range.to   instanceof Date) ? $scope.range.to   : null;
+
+    const rows = ($scope.data || []).filter(it => {
+      if (!it || it.emotion !== emo) return false;
+      const t = new Date(it.at);
+      if (from && t < from) return false;
+      if (to   && t > to)   return false;
+      return true;
+    });
+
+    const counts = {};
+    const pad = n => String(n).padStart(2,'0');
+    rows.forEach(it => {
+      const d = new Date(it.at);
+      const key = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}`;
+      counts[key] = (counts[key] || 0) + 1;
+    });
+
+    // Build dense hourly axis
+    let start = from, end = to;
+    if (!start || !end) {
+      const times = rows.map(r => +new Date(r.at)).sort((a,b)=>a-b);
+      if (times.length) {
+        start = start || new Date(times[0]);
+        end   = end   || new Date(times[times.length-1]);
+      } else {
+        start = start || new Date();
+        end   = end   || new Date(start.getTime() + 3600*1000);
+      }
+    }
+    start = new Date(start); start.setMinutes(0,0,0);
+    end   = new Date(end);   end.setMinutes(0,0,0);
+
+    const labels = [];
+    const data = [];
+    for (let t = new Date(start); t <= end; t = new Date(t.getTime() + 3600*1000)) {
+      const key = `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())} ${pad(t.getHours())}`;
+      labels.push(key.replace(' ', ' • '));
+      data.push(counts[key] || 0);
+    }
+
+    $scope.$applyAsync(function(){
+      $scope.emotionSeries = ['Entries/hour'];
+      $scope.emotionLabels = labels;
+      $scope.emotionLine   = [data]; // array-of-arrays
+    });
+  }; // <-- IMPORTANT: close pick_line here
+
+  // ----- Load stats from storage -----
+  $scope.refreshStats = function() {
+    localforage.getItem('emotion-wheel').then(function(list) {
+      const data = list || [];
+
+      // Weekday counts
+      const weekdayCounts = [0,0,0,0,0,0,0];
+      data.forEach(item => { const d = new Date(item.at); weekdayCounts[d.getDay()] += 1; });
+
+      // Per-emotion totals
+      const emotions = {};
+      data.forEach(item => { emotions[item.emotion] = (emotions[item.emotion] || 0) + 1; });
+
+      $scope.$applyAsync(function(){
+        $scope.data = data;
+
+        // Weekday chart
+        $scope.weekdayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        $scope.weekdaySeries = ['Entries'];
+        $scope.weekdayData   = [weekdayCounts];
+
+        // Bar/pie by emotion
+        $scope.chartSeries = Object.keys(emotions);
+        $scope.chartLabels = $scope.chartSeries.slice();
+        $scope.chartData   = $scope.chartSeries.map(e => emotions[e]);
+
+        // If an emotion is selected, rebuild the hourly line
+        if ($scope.currentEmotion) {
+          $scope.pick_line($scope.currentEmotion);
+        }
+      });
+    });
+  };
+
+  // Initial load
+  $scope.refreshStats();
+
+  // Recompute on data updates
+  var off = $scope.$on('emotion-wheel:updated', function(){
+    $scope.refreshStats();
+  });
+  $scope.$on('$destroy', off);
+
+  // Recompute hourly line if user adjusts range
+  $scope.$watchGroup(['range.from','range.to'], function(){
+    if ($scope.currentEmotion) $scope.pick_line($scope.currentEmotion);
+  });
+
 }]);
+
 
 app.controller('EntriesTable', function($scope, $timeout, $rootScope, DTOptionsBuilder, DTColumnDefBuilder){
 
   $scope.rows = [];
-
+  
   $scope.dtOptions = DTOptionsBuilder.newOptions()
     .withOption('order', [[0, 'desc']])
     .withOption('pageLength', 25)
@@ -492,32 +521,37 @@ app.controller('EntriesTable', function($scope, $timeout, $rootScope, DTOptionsB
       });
     });
   };
-  
-  $scope.deleteRow = function(at){
-    if (!confirm('Delete this entry?')) return;
+
+  $scope.openDeleteRow = function(row){
+    $scope.pendingDelete = row;
+    $timeout(function(){
+      const el = document.getElementById('deleteRowModal');
+      if (el) bootstrap.Modal.getOrCreateInstance(el).show();
+    }, 0);
+  };
+
+  $scope.confirmDeleteRow = function(){
+    if (!$scope.pendingDelete) return;
+    const at = $scope.pendingDelete.at;
     localforage.getItem('emotion-wheel')
       .then(list => (list || []).filter(it => it.at !== at))
       .then(next => localforage.setItem('emotion-wheel', next))
       .then(function(){
-        // Optimistically update table + notify others
         $scope.$applyAsync(function(){
           $scope.rows = $scope.rows.filter(r => r.at !== at);
+          $scope.pendingDelete = null;
         });
-        $timeout(function(){ $rootScope.$broadcast('emotion-wheel:updated'); });
+        $timeout(function(){ $rootScope.$broadcast('emotion-wheel:updated'); }, 0);
       });
   };
-  
+
   $scope.refreshTable();
-  
-  var off = $scope.$on('emotion-wheel:updated', function(){
-    $scope.refreshTable();
-  });
+  var off = $scope.$on('emotion-wheel:updated', function(){ $scope.refreshTable(); });
   $scope.$on('$destroy', off);
-  
 });
 
 app.controller('DataConfig', function($scope, $timeout, $rootScope) {
-
+  $scope.decision = { deleteData: null };
   // Export to JSON file
   $scope.exportData = function() {
     localforage.getItem('emotion-wheel').then(function(list){
@@ -558,14 +592,19 @@ app.controller('DataConfig', function($scope, $timeout, $rootScope) {
     };
     reader.readAsText(file);
   };
-
-  // Delete all data
-  $scope.clearData = function(){
-    if (!confirm('Delete all entries?')) return;
-    localforage.removeItem('emotion-wheel').then(function(){
-      $timeout(function(){ $rootScope.$broadcast('emotion-wheel:updated'); });
-      alert('All data deleted');
-    });
-  };
+  $scope.openDeleteAll = function(){
+	  const el = document.getElementById('deleteModal');
+	  if (el) bootstrap.Modal.getOrCreateInstance(el).show();
+	};
+	
+	$scope.doDeleteAll = function(){
+	  localforage.removeItem('emotion-wheel').then(function(){
+		$timeout(function(){
+		  const el = document.getElementById('deleteModal');
+		  if (el) bootstrap.Modal.getOrCreateInstance(el).hide();
+		  $rootScope.$broadcast('emotion-wheel:updated');
+		});
+	  });
+	};
 
 });
