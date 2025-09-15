@@ -437,7 +437,7 @@ app.controller('Statistics', ['$scope', '$timeout', function ($scope, $timeout) 
       $scope.emotionLabels = labels;
       $scope.emotionLine   = [data]; // array-of-arrays
     });
-  }; // <-- IMPORTANT: close pick_line here
+  };
 
   // ----- Load stats from storage -----
   $scope.refreshStats = function() {
@@ -482,7 +482,6 @@ app.controller('Statistics', ['$scope', '$timeout', function ($scope, $timeout) 
   });
   $scope.$on('$destroy', off);
 
-  // Recompute hourly line if user adjusts range
   $scope.$watchGroup(['range.from','range.to'], function(){
     if ($scope.currentEmotion) $scope.pick_line($scope.currentEmotion);
   });
@@ -608,3 +607,4 @@ app.controller('DataConfig', function($scope, $timeout, $rootScope) {
 	};
 
 });
+
